@@ -4,8 +4,10 @@
 EditorUi.initMinimalTheme = function()
 {
 	// Disabled in lightbox and chromeless mode
-	if (urlParams['lightbox'] == '1' || urlParams['chrome'] == '0')
+	if (urlParams['lightbox'] == '1' || urlParams['chrome'] == '0' || typeof window.Format === 'undefined' || typeof window.Menus === 'undefined')
 	{
+		window.uiTheme = null;
+		
 		return;
 	}
 	
@@ -23,7 +25,7 @@ EditorUi.initMinimalTheme = function()
            'div.geDialog { border-radius: 5px; }' +
            'html body div.geDialog button.geBigButton { color: #fff !important; }' +
            '.mxWindow button, .geDialog select, .mxWindow select { display:inline-block; }' +
-           '.mxWindow .geColorBtn, .geDialog .geColorBtn { background: none !important; }' +
+           'html body .mxWindow .geColorBtn, html body .geDialog .geColorBtn { background: none; }' +
            'html body div.diagramContainer button, html body .mxWindow button, html body .geDialog button { min-width: 0px; border-radius: 5px; color: #353535 !important; border-color: rgb(216, 216, 216); }' +
            'div.diagramContainer button.geBtn, .mxWindow button.geBtn, .geDialog button.geBtn { min-width:72px; font-weight: 600; background: none; }' +
            'div.diagramContainer button.geBtn:hover, .mxWindow button.geBtn:hover, .geDialog button.geBtn:hover { box-shadow: none; border-color: rgb(216, 216, 216); }' +
@@ -116,7 +118,7 @@ EditorUi.initMinimalTheme = function()
 	    {
 	        ui.formatWindow = new WrapperWindow(ui, mxResources.get('format'),
 	           Math.max(20, ui.diagramContainer.clientWidth - 240 - 12), 56,
-	           240, Math.min(546, graph.container.clientHeight - 10), function(container)
+	           240, Math.min(550, graph.container.clientHeight - 10), function(container)
 	        {
 	            var format = ui.createFormat(container);
 	            format.init();
@@ -263,28 +265,8 @@ EditorUi.initMinimalTheme = function()
     mxWindow.prototype.closeImage = Graph.createSvgImage(18, 10, '<path d="M 5 1 L 13 9 M 13 1 L 5 9" stroke="#C0C0C0" stroke-width="2"/>').src;
     mxWindow.prototype.minimizeImage = Graph.createSvgImage(14, 10, '<path d="M 3 7 L 7 3 L 11 7" stroke="#C0C0C0" stroke-width="2" fill="#ffffff"/>').src;
     mxWindow.prototype.normalizeImage = Graph.createSvgImage(14, 10, '<path d="M 3 3 L 7 7 L 11 3" stroke="#C0C0C0" stroke-width="2" fill="#ffffff"/>').src;
-    mxVertexHandler.prototype.handleImage = Graph.createSvgImage(16, 16, '<circle cx="8" cy="8" r="5" stroke="' + stroke + '" fill="' + fill + '"/>');
-    mxEdgeHandler.prototype.handleImage = mxVertexHandler.prototype.handleImage;
-    mxEdgeHandler.prototype.terminalHandleImage = Graph.createSvgImage(16, 16, '<circle cx="8" cy="8" r="5" stroke="' + stroke + '" fill="' + fill + '"/><circle cx="8" cy="8" r="3" stroke="' + stroke + '" fill="' + fill + '"/>');
-    mxEdgeHandler.prototype.fixedHandleImage = Graph.createSvgImage(16, 16, '<circle cx="8" cy="8" r="5" stroke="' + stroke + '" fill="' + fill + '"/><path d="m 6 6 L 10 10 M 6 10 L 10 6" stroke="' + stroke + '"/>');
     mxConstraintHandler.prototype.pointImage = Graph.createSvgImage(5, 5, '<path d="m 0 0 L 5 5 M 0 5 L 5 0" stroke="' + fill + '"/>');
-    HoverIcons.prototype.triangleUp = Graph.createSvgImage(18, 38, '<path d="m 6 36 L 12 36 L 12 12 L 18 12 L 9 1 L 1 12 L 6 12 z" stroke="#fff" fill="' + fill + '"/>');
-    HoverIcons.prototype.triangleRight = Graph.createSvgImage(36, 18, '<path d="m 1 6 L 24 6 L 24 1 L 36 9 L 24 18 L 24 12 L 1 12 z" stroke="#fff" fill="' + fill + '"/>');
-    HoverIcons.prototype.triangleDown = Graph.createSvgImage(18, 36, '<path d="m 6 1 L 6 24 L 1 24 L 9 36 L 18 24 L 12 24 L 12 1 z" stroke="#fff" fill="' + fill + '"/>');
-    HoverIcons.prototype.triangleLeft = Graph.createSvgImage(38, 18, '<path d="m 1 9 L 12 1 L 12 6 L 36 6 L 36 12 L 12 12 L 12 18 z" stroke="#fff" fill="' + fill + '"/>');
-    HoverIcons.prototype.roundDrop = Graph.createSvgImage(26, 26, '<circle cx="13" cy="13" r="12" stroke="#fff" fill="' + fill + '"/>');
-    HoverIcons.prototype.arrowSpacing = 0;
     mxOutline.prototype.sizerImage = null;
-
-    if (window.Sidebar != null)
-    {
-        Sidebar.prototype.triangleUp = HoverIcons.prototype.triangleUp;
-        Sidebar.prototype.triangleRight = HoverIcons.prototype.triangleRight;
-        Sidebar.prototype.triangleDown = HoverIcons.prototype.triangleDown;
-        Sidebar.prototype.triangleLeft = HoverIcons.prototype.triangleLeft;
-        Sidebar.prototype.refreshTarget = HoverIcons.prototype.refreshTarget;
-        Sidebar.prototype.roundDrop = HoverIcons.prototype.roundDrop;
-    }
     
     mxConstants.VERTEX_SELECTION_COLOR = '#C0C0C0';
     mxConstants.EDGE_SELECTION_COLOR = '#C0C0C0';
@@ -295,7 +277,6 @@ EditorUi.initMinimalTheme = function()
 
     mxConstants.HIGHLIGHT_STROKEWIDTH = 5;
     mxConstants.HIGHLIGHT_OPACITY = 35;
-    mxConstants.HIGHLIGHT_SIZE = 5;
     mxConstants.OUTLINE_COLOR = '#29b6f2';
     mxConstants.OUTLINE_HANDLE_FILLCOLOR = '#29b6f2';
     mxConstants.OUTLINE_HANDLE_STROKECOLOR = '#fff';
@@ -516,14 +497,14 @@ EditorUi.initMinimalTheme = function()
         
         if (graph.getSelectionCount() == 1)
         {
-            this.addMenuItems(menu, ['-', 'editTooltip', 'editStyle', '-'], null, evt);
+            this.addMenuItems(menu, ['editTooltip', '-', 'editStyle', 'editGeometry', '-'], null, evt);
 
             if (graph.isCellFoldable(graph.getSelectionCell()))
             {
                 this.addMenuItems(menu, (graph.isCellCollapsed(cell)) ? ['expand'] : ['collapse'], null, evt);
             }
-
-            this.addMenuItems(menu, ['lockUnlock', 'enterGroup'], null, evt);
+            
+            this.addMenuItems(menu, ['collapsible', '-', 'lockUnlock', 'enterGroup'], null, evt);
             menu.addSeparator();
             this.addSubmenu('layout', menu);
         }
@@ -713,9 +694,10 @@ EditorUi.initMinimalTheme = function()
 
         this.put('diagram', new Menu(mxUtils.bind(this, function(menu, parent)
         {
+			var file = ui.getCurrentFile();
         	ui.menus.addSubmenu('extras', menu, parent, mxResources.get('preferences'));
 			menu.addSeparator(parent);
-
+			
 			if (mxClient.IS_CHROMEAPP || EditorUi.isElectronApp)
 			{
 				ui.menus.addMenuItems(menu, ['new', 'open', '-', 'save', 'saveAs', '-'], parent);
@@ -740,29 +722,24 @@ EditorUi.initMinimalTheme = function()
 			}
 			
 			ui.menus.addSubmenu('exportAs', menu, parent);
-
-			var file = ui.getCurrentFile();
 			
 			if (file != null && file.constructor == DriveFile)
 			{
 				ui.menus.addMenuItems(menu, ['-', 'share'], parent);
-
+				
 				if (file.realtime != null)
 				{
 					ui.menus.addMenuItems(menu, ['chatWindowTitle'], parent);
+				}
+				else
+				{
+					ui.menus.addMenuItems(menu, ['-', 'refresh'], parent);
 				}
 				
 				menu.addSeparator(parent);
 			}
 			
-			ui.menus.addMenuItems(menu, ['-', 'outline', 'layers', '-', 'find'], parent);
-			
-			var item = this.addMenuItem(menu, 'tags', parent);
-			
-			if (!ui.isOffline() || mxClient.IS_CHROMEAPP)
-			{
-				ui.menus.addLinkToItem(item, 'https://desk.draw.io/support/solutions/articles/16000046966');
-			}
+			ui.menus.addMenuItems(menu, ['-', 'outline', 'layers', '-', 'find', 'tags'], parent);
 			
 			// Cannot use print in standalone mode on iOS as we cannot open new windows
 			if (!mxClient.IS_IOS || !navigator.standalone)
@@ -806,7 +783,19 @@ EditorUi.initMinimalTheme = function()
 			}
 			else
 			{
-				ui.menus.addMenuItems(menu, ['save', 'saveAs', '-', 'rename', 'makeCopy'], parent);
+				ui.menus.addMenuItems(menu, ['save', 'saveAs', '-', 'rename'], parent);
+				
+				if (ui.isOfflineApp())
+				{
+					if (navigator.onLine && urlParams['stealth'] != '1')
+					{
+						this.addMenuItems(menu, ['upload'], parent);
+					}
+				}
+				else
+				{
+					ui.menus.addMenuItems(menu, ['makeCopy'], parent);
+				}
 			}
 
 			if (file != null && (file.constructor == DriveFile || file.constructor == DropboxFile))
@@ -823,15 +812,16 @@ EditorUi.initMinimalTheme = function()
         this.put('exportAs', new Menu(mxUtils.bind(this, function(menu, parent)
         {
         	exportAsMenu.funct(menu, parent);
-            menu.addSeparator(parent);
-            ui.menus.addSubmenu('embed', menu, parent);
-            
+
     		if (!mxClient.IS_CHROMEAPP && !EditorUi.isElectronApp)
     		{
 	            // Publish menu contains only one element by default...
 	            //ui.menus.addSubmenu('publish', menu, parent); 
 	            ui.menus.addMenuItems(menu, ['publishLink'], parent);
     		}
+    		
+            menu.addSeparator(parent);
+            ui.menus.addSubmenu('embed', menu, parent);
         })));
 
         var langMenu = this.get('language');
@@ -857,15 +847,10 @@ EditorUi.initMinimalTheme = function()
 				ui.menus.addMenuItems(menu, ['-', 'search', 'scratchpad', '-', 'showStartScreen'], parent);
 			}
 
-			if (!ui.isOfflineApp() && urlParams['embed'] != '1' && isLocalStorage)
+			if (!ui.isOfflineApp() && isLocalStorage)
 			{
 				menu.addSeparator(parent);
-	        	var item = ui.menus.addMenuItem(menu, 'plugins', parent);
-				
-				if (!ui.isOffline())
-				{
-					ui.menus.addLinkToItem(item, 'https://desk.draw.io/support/solutions/articles/16000056430');
-				}
+	        	ui.menus.addMenuItem(menu, 'plugins', parent);
 			}
         })));
         
@@ -881,7 +866,16 @@ EditorUi.initMinimalTheme = function()
         {
             ui.menus.addMenuItems(menu, ['insertRectangle', 'insertEllipse', 'insertRhombus', '-', 'insertText',
                                          'insertLink', '-', 'insertImage'], parent);
-            ui.menus.addSubmenu('importFrom', menu, parent);
+            
+            if (mxClient.IS_CHROMEAPP || EditorUi.isElectronApp)
+            {
+            	ui.menus.addMenuItems(menu, ['import'], parent);
+            }
+            else
+            {
+            	ui.menus.addSubmenu('importFrom', menu, parent);
+            }
+            
             menu.addSeparator(parent);
             ui.menus.addSubmenu('insertLayout', menu, parent);
             ui.menus.addSubmenu('insertAdvanced', menu, parent);
@@ -1287,7 +1281,7 @@ EditorUi.initMinimalTheme = function()
 	        createGroup([elt, addMenuItem(mxResources.get('delete'), ui.actions.get('delete').funct, null, mxResources.get('delete'), ui.actions.get('delete'),
 	        		(small) ? 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNiAxOWMwIDEuMS45IDIgMiAyaDhjMS4xIDAgMi0uOSAyLTJWN0g2djEyek0xOSA0aC0zLjVsLTEtMWgtNWwtMSAxSDV2MmgxNFY0eiIvPjwvc3ZnPg==' : null)]);
 	        
-	        if (iw >= 480)
+	        if (iw >= 411)
 	        {
 	        	var undoAction = ui.actions.get('undo');
 	        	var redoAction = ui.actions.get('redo');
@@ -1299,7 +1293,7 @@ EditorUi.initMinimalTheme = function()
 		
 		        createGroup([undoElt, redoElt]);
 	
-		        if (iw >= 560)
+		        if (iw >= 480)
 		        {
 		        	var zoomInAction = ui.actions.get('zoomIn');
 		        	var zoomOutAction = ui.actions.get('zoomOut');
@@ -1331,7 +1325,8 @@ EditorUi.initMinimalTheme = function()
 	        
 	        var langMenu = ui.menus.get('language');
 
-			if (langMenu != null && !mxClient.IS_CHROMEAPP && !EditorUi.isElectronApp && iw >= 480)
+			if (langMenu != null && !mxClient.IS_CHROMEAPP &&
+				!EditorUi.isElectronApp && iw >= 540)
 			{
 				var elt = menuObj.addMenu('', langMenu.funct);
 				elt.setAttribute('title', mxResources.get('language'));
