@@ -2,16 +2,11 @@
  * Copyright (c) 2006-2017, JGraph Ltd
  * Copyright (c) 2006-2017, Gaudenz Alder
  */
-DriveFile = function(ui, data, desc, doc)
+DriveFile = function(ui, data, desc)
 {
 	DrawioFile.call(this, ui, data);
 	
 	this.desc = desc;
-
-	if (doc != null && doc.getModel() != null && doc.getModel().getRoot() != null)
-	{
-		this.realtime = new DriveRealtime(this, doc);
-	}
 };
 
 //Extends mxEventSource
@@ -21,6 +16,19 @@ mxUtils.extend(DriveFile, DrawioFile);
  * Delay for last save in ms.
  */
 DriveFile.prototype.saveDelay = 0;
+
+/**
+ * Delay for last save in ms.
+ */
+DriveFile.prototype.allChangesSavedKey = 'allChangesSavedInDrive';
+
+/**
+ * Specifies if notify events should be ignored.
+ */
+DriveFile.prototype.getSize = function()
+{
+	return this.desc.fileSize;
+};
 
 /**
  * Returns true if copy, export and print are not allowed for this file.
@@ -37,6 +45,14 @@ DriveFile.prototype.isRestricted = function()
 DriveFile.prototype.isConflict = function(err)
 {
 	return err != null && err.error != null && err.error.code == 412;
+};
+
+/**
+ * Returns the current etag.
+ */
+DriveFile.prototype.getCurrentUser = function()
+{
+	return (this.ui.drive != null) ? this.ui.drive.user : null;
 };
 
 /**
@@ -93,47 +109,6 @@ DriveFile.prototype.isAutosaveOptional = function()
  * @param {number} dx X-coordinate of the translation.
  * @param {number} dy Y-coordinate of the translation.
  */
-DriveFile.prototype.isAutosave = function()
-{
-	return this.ui.editor.autosave || (this.realtime != null && this.isAutosaveRevision());
-};
-
-/**
- * Returns true if an autosave is required at the time of execution.
- * This implementation returns true.
- */
-DriveFile.prototype.isAutosaveNow = function()
-{
-	if (this.realtime != null && this.realtime.root != null)
-	{
-		var backup = parseInt(this.realtime.root.get('backupDate'));
-		var modified = parseInt(this.realtime.root.get('modifiedDate'));
-
-		return isNaN(backup) || isNaN(modified) || backup < modified;
-	}
-	else
-	{
-		return true;
-	}
-};
-
-/**
- * Hooks for subclassers after the autosave has completed.
- */
-DriveFile.prototype.autosaveCompleted = function()
-{
-	if (this.realtime != null && this.realtime.root != null)
-	{
-		this.realtime.root.set('backupDate', new Date().getTime());
-	}
-};
-
-/**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
- */
 DriveFile.prototype.isRenamable = function()
 {
 	return this.isEditable() && DrawioFile.prototype.isEditable.apply(this, arguments);
@@ -171,97 +146,205 @@ DriveFile.prototype.save = function(revision, success, error, unloading, overwri
  */
 DriveFile.prototype.saveFile = function(title, revision, success, error, unloading, overwrite)
 {
-	if (!this.isEditable())
+	try
 	{
-		if (success != null)
+		if (!this.isEditable())
 		{
-			success();
+			if (success != null)
+			{
+				success();
+			}
+		}
+		else if (!this.savingFile)
+		{
+			var doSave = mxUtils.bind(this, function(realOverwrite, realRevision)
+			{
+				try
+				{
+					var lastDesc = this.desc;
+					
+					// Makes sure no changes get lost while the file is saved
+					var modified = this.isModified();
+					this.setModified(false);
+					this.savingFile = true;
+		
+					// Waits for success for modified state to be visible
+					var prevModified = this.isModified;
+					
+					this.isModified = function()
+					{
+						return true;
+					};
+		
+					this.ui.drive.saveFile(this, realRevision, mxUtils.bind(this, function(resp, savedData)
+					{
+						try
+						{
+							this.isModified = prevModified;
+							this.savingFile = false;
+							
+							// Handles special case where resp is false eg
+							// if the old file was converted to realtime
+							if (resp != false)
+							{
+								if (revision)
+								{
+									this.lastAutosaveRevision = new Date().getTime();
+								}
+			
+								// Adaptive autosave delay
+								this.autosaveDelay = Math.min(8000,
+									Math.max(this.saveDelay + 500,
+									DriveFile.prototype.autosaveDelay));
+								this.desc = resp;
+								
+								this.fileSaved(savedData, lastDesc, mxUtils.bind(this, function()
+								{
+									this.contentChanged();
+									
+									if (success != null)
+									{
+										success(resp);
+									}
+								}), error);
+							}
+							else
+							{
+								this.setModified(modified || this.isModified());
+								
+								if (error != null)
+								{
+									error(resp);
+								}
+							}
+						}
+						catch (e)
+						{
+							this.setModified(modified || this.isModified());
+							
+							if (error != null)
+							{
+								error(e);
+							}
+							else
+							{
+								throw e;
+							}
+						}
+					}), mxUtils.bind(this, function(err, desc)
+					{
+						try
+						{
+							this.savingFile = false;
+							this.isModified = prevModified;
+							this.setModified(modified || this.isModified());
+						
+							if (this.isConflict(err))
+							{
+								this.inConflictState = true;
+								
+								if (this.sync != null)
+								{
+									this.savingFile = true;
+									
+									this.sync.fileConflict(desc, mxUtils.bind(this, function()
+									{
+										// Adds random cool-off
+										window.setTimeout(mxUtils.bind(this, function()
+										{
+											this.updateFileData();
+											doSave(realOverwrite, true);
+										}), 100 + Math.random() * 500);
+									}), mxUtils.bind(this, function()
+									{
+										this.savingFile = false;
+										
+										if (error != null)
+										{
+											error();
+										}
+									}));
+								}
+								else if (error != null)
+								{
+									error();
+								}
+							}
+							else if (error != null)
+							{
+								error(err);
+							}
+						}
+						catch (e)
+						{
+							this.setModified(modified || this.isModified());
+							
+							if (error != null)
+							{
+								error(e);
+							}
+							else
+							{
+								throw e;
+							}
+						}
+					}), unloading, unloading, realOverwrite);
+				}
+				catch (e)
+				{
+					if (error != null)
+					{
+						error(e);
+					}
+					else
+					{
+						throw e;
+					}
+				}
+			});
+			
+			doSave(overwrite, revision);
 		}
 	}
-	else if (!this.savingFile)
+	catch (e)
 	{
-		var prevModified = this.isModified;
-		var modified = this.isModified();
-		
-		// Makes sure no changes get lost while the file is saved
-		this.setModified(false);
-
-		// Waits for success for modified state to be visible
-		this.isModified = function()
+		if (error != null)
 		{
-			return true;
-		};
-		
-		var doSave = mxUtils.bind(this, function(realOverwrite, realRevision)
+			error(e);
+		}
+		else
 		{
-			this.savingFile = true;
-			
-			this.ui.drive.saveFile(this, realRevision, mxUtils.bind(this, function(resp)
-			{
-				this.isModified = prevModified;
-				this.savingFile = false;
-				
-				// Handles special case where resp is false eg
-				// if the old file was converted to realtime
-				if (resp != false)
-				{
-					if (revision)
-					{
-						this.lastAutosaveRevision = new Date().getTime();
-					}
-					
-					this.desc = resp;
-					this.contentChanged();
-					
-					if (success != null)
-					{
-						success(resp);
-					}
-				}
-				else
-				{
-					this.setModified(modified || this.isModified());
-					
-					if (error != null)
-					{
-						error(resp);
-					}
-				}
-			}), mxUtils.bind(this, function(err)
-			{
-				var doError = mxUtils.bind(this, function()
-				{
-					this.setModified(modified || this.isModified());
-					this.isModified = prevModified;
-					this.savingFile = false;
-					
-					if (error != null)
-					{
-						error(err);
-					}
-				});
-				
-				if (this.isConflict(err))
-				{
-					this.showConflictDialog(function()
-					{
-						// Overwrites and creates revision
-						doSave(true, true);
-					}, function()
-					{
-						err = null;
-						doError();
-					});
-				}
-				else
-				{
-					doError();
-				}
-			}), unloading, unloading, realOverwrite);
-		});
-		
-		doSave(overwrite, revision);
+			throw e;
+		}
 	}
+};
+
+/**
+ * Shows a conflict dialog to the user.
+ */
+DriveFile.prototype.copyFile = function(success, error)
+{
+	if (!this.isRestricted())
+	{
+		this.makeCopy(mxUtils.bind(this, function()
+		{
+			if (this.ui.spinner.spin(document.body, mxResources.get('saving')))
+			{
+				try
+				{
+					this.save(true, success, error)
+				}
+				catch (e)
+				{
+					error(e);
+				}
+			}
+		}), error, true);
+	}
+	else
+	{
+		DrawioFile.prototype.copyFile.apply(this, arguments);
+	}	
 };
 
 /**
@@ -276,11 +359,16 @@ DriveFile.prototype.makeCopy = function(success, error, timestamp)
 		// be updated as soon as we have the ID.
 		this.saveAs(this.ui.getCopyFilename(this, timestamp), mxUtils.bind(this, function(resp)
 		{
-			// Replaces the descriptor to and writes the file
-			this.ui.spinner.stop();
 			this.desc = resp;
-			success();
+			this.ui.spinner.stop();
 			this.setModified(false);
+			
+			this.backupPatch = null;
+			this.invalidChecksum = false;
+			this.inConflictState = false;
+			
+			this.descriptorChanged();
+			success();
 		}), mxUtils.bind(this, function()
 		{
 			this.ui.spinner.stop();
@@ -312,21 +400,34 @@ DriveFile.prototype.saveAs = function(filename, success, error)
  */
 DriveFile.prototype.rename = function(title, success, error)
 {
-	this.ui.drive.renameFile(this.getId(), title, mxUtils.bind(this, function(resp)
+	var etag = this.getCurrentEtag();
+	
+	this.ui.drive.renameFile(this.getId(), title, mxUtils.bind(this, function(desc)
 	{
 		if (!this.hasSameExtension(title, this.getTitle()))
 		{
-			this.desc = resp;
+			this.desc = desc;
+
+			if (this.sync != null)
+			{
+				this.sync.descriptorChanged(etag);
+			}
+			
 			this.save(true, success, error);
 		}
 		else
 		{
-			this.desc = resp;
+			this.desc = desc;
 			this.descriptorChanged();
+			
+			if (this.sync != null)
+			{
+				this.sync.descriptorChanged(etag);
+			}
 			
 			if (success != null)
 			{
-				success(resp);
+				success(desc);
 			}
 		}
 	}), error);
@@ -393,365 +494,159 @@ DriveFile.prototype.getId = function()
  */
 DriveFile.prototype.isEditable = function()
 {
-	var editable = DrawioFile.prototype.isEditable.apply(this, arguments);
-	
-	if (this.realtime != null)
-	{
-		return editable && !this.realtime.rtModel.isReadOnly;
-	}
-	else
-	{
-		return editable && this.desc.editable;
-	}
+	return DrawioFile.prototype.isEditable.apply(this, arguments) &&
+		this.desc.editable;
 };
 
 /**
- * Returns the location as a new object.
+ * Hook for subclassers.
  */
-DriveFile.prototype.open = function()
+DriveFile.prototype.isSyncSupported = function()
 {
-	if (this.realtime != null)
-	{
-		this.realtime.start();
-	}
-	else
-	{
-		DrawioFile.prototype.open.apply(this, arguments);
-	}
+	return true;
 };
 
 /**
- * Returns the location as a new object.
+ * Hook for subclassers.
  */
-DriveFile.prototype.close = function(unloading)
+DriveFile.prototype.isRevisionHistorySupported = function()
 {
-	unloading = (unloading != null) ? unloading : false;
-	DrawioFile.prototype.close.apply(this, arguments);
-	
-	if (this.realtime != null)
-	{
-		this.realtime.destroy(unloading);
-		this.realtime = null;
-	}
+	return true;
 };
 
 /**
- * Shows a conflict dialog to the user.
+ * Hook for subclassers.
  */
-DriveFile.prototype.showConflictDialog = function(retry, error)
+DriveFile.prototype.getRevisions = function(success, error)
 {
-	if (!this.showingConflictDialog)
+	this.ui.drive.executeRequest(gapi.client.drive.revisions.list({'fileId': this.getId()}),
+		mxUtils.bind(this, function(resp)
 	{
-		var resume = (this.ui.spinner != null && this.ui.spinner.pause != null) ?
-			this.ui.spinner.pause() : function() {};
-		var prev = this.changeListenerEnabled;
-		this.changeListenerEnabled = false;
-		this.showingConflictDialog = true;
-
-		this.ui.showError(mxResources.get('externalChanges'), mxResources.get('fileChangedOverwrite'),
-			mxResources.get('makeCopy'), mxUtils.bind(this, function()
+		for (var i = 0; i < resp.items.length; i++)
 		{
-			this.showingConflictDialog = false;
-			this.changeListenerEnabled = prev;
-			this.makeCopy(retry, error, true);
-		}), null, mxResources.get('overwrite'), mxUtils.bind(this, function()
-		{
-			this.showingConflictDialog = false;
-			this.changeListenerEnabled = prev;
-			resume();
-			retry();
-		}), mxResources.get('cancel'), mxUtils.bind(this, function()
-		{
-			this.showingConflictDialog = false;
-			this.changeListenerEnabled = prev;
-			this.ui.hideDialog();
-			resume();
-			error();
-		}), 360, 180);
-		
-		// Adds important notice to dialog
-		if (this.ui.dialog != null && this.ui.dialog.container != null)
-		{
-			var alert = document.createElement('a');
-			alert.className = 'geStatusAlert';
-			alert.style.display = 'block';
-			alert.style.position = 'absolute';
-			alert.style.cursor = 'pointer';
-			alert.style.bottom = '0';
-			alert.style.padding = '8px 0 8px 0';
-			alert.style.marginBottom = '26px';
-			alert.style.left = '0';
-			alert.style.right = '0';
-			alert.style.textAlign = 'center';
-			alert.style.borderRadius = '0';
-			alert.style.borderLeftStyle = 'none';
-			alert.style.borderRightStyle = 'none';
-			alert.style.textDecoration = 'none';
-			alert.style.fontWeight = 'bold';
-			
-			alert.setAttribute('href', 'https://desk.draw.io/support/solutions/articles/16000087215');
-			alert.setAttribute('target', '_blank');
-			mxUtils.write(alert, mxResources.get('collaborativeEditingNotice'));
-			
-			this.ui.dialog.container.appendChild(alert);
-		}
-	}
-};
-
-/**
- * Checks the conversion of the realtime model for this file.
- */
-DriveFile.prototype.checkConvert = function()
-{
-	var doCheck = mxUtils.bind(this, function(json)
-	{
-		try
-		{
-			if (this.ui.getCurrentFile() == this && !this.isModified())
+			(mxUtils.bind(this, function(item)
 			{
-				this.ui.drive.getXmlFile(this.desc, null, mxUtils.bind(this, function(file)
+				// Redirects title to originalFilename to
+				// match expected descriptor interface
+				item.title = item.originalFilename;
+				
+				item.getXml = mxUtils.bind(this, function(itemSuccess, itemError)
 				{
-					try
-					{
-						var data = file.getData();
-						var node = (data != null) ? mxUtils.parseXml(data).documentElement : null;
-						
-						if (node != null)
-						{
-							var tmp = this.ui.editor.extractGraphModel(node, true);
-							
-							if (tmp != null)
-							{
-								node = tmp;
-							}
-						}
-						
-						if (this.runCheck != null)
-						{
-							this.runCheck(json, node, data);
-						}
-					}
-					catch (e)
-					{
-						this.log('CATCH-PARSEFILE-' + e.stack);
-						this.runCheck(json, null, 'CATCH-PARSEFILE-' + e.stack);
-					}
-				}), mxUtils.bind(this, function(err)
+					this.ui.drive.getXmlFile(item, mxUtils.bind(this, function(file)
+		   			{
+						itemSuccess(file.getData());
+		   			}), itemError);
+				});
+				
+				item.getUrl = mxUtils.bind(this, function(page)
 				{
-					this.log('ERROR-GETFILE');
-					this.runCheck(json, null, 'ERROR-GETFILE');
-				}), true);
-			}
+					return this.ui.getUrl(window.location.pathname + '?rev=' + item.id +
+						'&chrome=0&nav=1&layers=1&edit=_blank' + ((page != null) ?
+						'&page=' + page : '')) + window.location.hash;
+				});
+			}))(resp.items[i]);
 		}
-		catch (e)
-		{
-			this.log('CATCH-GETFILE-' + e.stack);
-			this.runCheck(json, null, 'CATCH-GETFILE-' + e.stack);
-		}
-	});
-	
-	try
-	{
-		this.ui.drive.getRealtimeData(this.desc.id, doCheck, doCheck);
-	}
-	catch (e)
-	{
-		this.log('CATCH-GETJSON-' + e.stack, true);
-	}
+		
+		success(resp.items);
+	}), error);
 };
 
 /**
- * Removes all attributes that are irrelevant for structural diff.
+ * Adds the listener for automatically saving the diagram for local changes.
  */
-DriveFile.prototype.getComparableFile = function(node)
+DriveFile.prototype.getLatestVersion = function(success, error)
 {
-	// Removes all attributes from the mxfile
-	while (node.attributes.length > 0)
-	{
-		node.removeAttribute(node.attributes[0].name);
-	}
-
-	// Removes all diagram IDs since those can be missing in
-	// realtime but will be added on the fly
-	var diagrams = node.getElementsByTagName('diagram');
-	
-	for (var i = 0; i < diagrams.length; i++)
-	{
-		diagrams[i].removeAttribute('name');
-		diagrams[i].removeAttribute('id');
-
-		// Uncompress diagram data for structural comparison
-		var tmp = this.ui.editor.graph.decompress(mxUtils.getTextContent(diagrams[i]));
-		
-		if (tmp != null && tmp.length > 0)
-		{
-			while (diagrams[i].firstChild != null)
-			{
-				diagrams[i].removeChild(diagrams[i].firstChild);
-			}
-
-			diagrams[i].appendChild(mxUtils.parseXml(tmp).documentElement);
-		}
-	}
-	
-	// Some attributes have been initialized using different defaults
-	// in the UI compared to realtime so they must be ignored
-	var models = node.getElementsByTagName('mxGraphModel');
-	
-	for (var i = 0; i < models.length; i++)
-	{
-		while (models[i].attributes.length > 0)
-		{
-			models[i].removeAttribute(models[i].attributes[0].name);
-		}
-	}
-	
-	return node;
+	this.ui.drive.getFile(this.getId(), success, error, true);
 };
 
 /**
- * Removes all labels, user objects and styles from the given node.
+ * Adds all listeners.
  */
-DriveFile.prototype.getAnonymizedXml = function(node)
+DriveFile.prototype.getChannelId = function()
 {
-	if (node != null)
-	{
-		var nodes = node.getElementsByTagName('mxCell');
+	var chan = this.ui.drive.getCustomProperty(this.desc, 'channel');
 	
-		for (var i = 0; i < nodes.length; i++)
-		{
-			nodes[i].removeAttribute('style');
-			nodes[i].removeAttribute('value');
-			
-			if (nodes[i].parentNode != null && nodes[i].parentNode.nodeName == 'UserObject' &&
-				nodes[i].parentNode.parentNode != null)
-			{
-				nodes[i].parentNode.parentNode.replaceChild(nodes[i], nodes[i].parentNode);
-			}
-		}
-		
-		return mxUtils.getPrettyXml(node);;
-	}
-	else
+	if (chan != null)
 	{
-		return 'null';
+		chan = 'G-' + this.getId() + '.' + chan;
 	}
-};
-
-/**
- * Removes all labels, user objects and styles from the given JSON.
- */
-DriveFile.prototype.getAnonymizedJson = function(json)
-{
-	if (json != null)
-	{
-		var diagrams = json.value.diagrams.value;
-		
-		for (var i = 0; i < diagrams.length; i++)
-		{
-			if (diagrams[i].value != null && diagrams[i].value.root != null)
-			{
-				this.anonymizeJsonCell(diagrams[i].value.root.value);
-			}
-		}
-		
-		return JSON.stringify(json);
-	}
-	else
-	{
-		return 'null';
-	}
-};
-
-/**
- * Returns the location as a new object.
- */
-DriveFile.prototype.anonymizeJsonCell = function(json)
-{
-	if (json != null)
-	{
-		delete json.xmlValue;
-		delete json.value;
-		delete json.style;
-		
-		if (json.children != null && json.children.value != null)
-		{
-			for (var i = 0; i < json.children.value.length; i++)
-			{
-				this.anonymizeJsonCell(json.children.value[i].value);
-			}
-		}
-	}
-};
-
-/**
- * Debug output.
- */
-DriveFile.prototype.debug = function()
-{
-	if (window.console != null && urlParams['test'] == '1')
-	{
-		console.log.apply(console, arguments);
-	}
-};
-
-/**
- * Debug output.
- */
-DriveFile.prototype.log = function(msg, sendReport)
-{
-	this.debug(msg);
 	
-	try
-	{
-		this.ui.logEvent({category: this.ui.JSON_CHECK, action: msg, label: this.desc.id});
-		
-		if (sendReport)
-		{
-			this.report('Realtime Log Report ' + new Date() +
-				'\n\nDescription: ' + JSON.stringify({version: this.ui.JSON_CHECK,
-					title: this.desc.title, editable: this.desc.editable,
-					copyable: this.desc.copyable, labels: this.desc.labels, id: this.desc.id,
-					userPermission: this.desc.userPermission, fileSize: this.desc.fileSize,
-					fileExtension: this.desc.fileExtension, modifiedDate: this.desc.modifiedDate,
-					mimeType: this.desc.mimeType}) +
-				'\n\nMessage:\n' + msg);
-		}
-	}
-	catch (e)
-	{
-		// ignore
-	}
+	return chan;
 };
 
 /**
- * Debug output.
+ * Gets the channel ID from the given descriptor.
  */
-DriveFile.prototype.report = function(data)
+DriveFile.prototype.getChannelKey = function()
 {
-	try
+	return this.ui.drive.getCustomProperty(this.desc, 'key');
+};
+
+/**
+ * Adds all listeners.
+ */
+DriveFile.prototype.getLastModifiedDate = function()
+{
+	return new Date(this.desc.modifiedDate);
+};
+
+/**
+ * Adds all listeners.
+ */
+DriveFile.prototype.getDescriptor = function()
+{
+	return this.desc;
+};
+
+/**
+* Updates the descriptor of this file with the one from the given file.
+*/
+DriveFile.prototype.setDescriptor = function(desc)
+{
+	this.desc = desc;
+};
+
+/**
+ * Returns the etag from the given descriptor.
+ */
+DriveFile.prototype.getDescriptorSecret = function(desc)
+{
+	return this.ui.drive.getCustomProperty(desc, 'secret');
+};
+
+/**
+ * Adds all listeners.
+ */
+DriveFile.prototype.getDescriptorEtag = function(desc)
+{
+	return desc.etag;
+};
+
+/**
+ * Adds the listener for automatically saving the diagram for local changes.
+ */
+DriveFile.prototype.setDescriptorEtag = function(desc, etag)
+{
+	desc.etag = etag;
+};
+
+/**
+ * Adds the listener for automatically saving the diagram for local changes.
+ */
+DriveFile.prototype.loadPatchDescriptor = function(success, error)
+{
+	this.ui.drive.executeRequest(gapi.client.drive.files.get({'fileId': this.getId(),
+		'fields': this.ui.drive.catchupFields, 'supportsTeamDrives': true}),
+		mxUtils.bind(this, function(desc)
 	{
-		if (data.length > 3000000)
-		{
-			data = data.substring(0, 3000000) + '\n...[REPORT SHORTENED]'
-		}
-		
-		this.debug(data);
-		
-		mxUtils.post('/email', 'version=' + encodeURIComponent(EditorUi.VERSION) +
-			'&url=' + encodeURIComponent(window.location.href) +
-			'&data=' + encodeURIComponent(data),
-			mxUtils.bind(this, function(req)
-			{
-				this.debug('report sent');
-			}),
-			mxUtils.bind(this, function()
-			{
-				this.debug('report failed');
-			}));
-	}
-	catch (e)
-	{
-		// ignore
-	}
+		success(desc);
+	}), error);
+};
+
+/**
+ * Adds the listener for automatically saving the diagram for local changes.
+ */
+DriveFile.prototype.loadDescriptor = function(success, error)
+{
+	this.ui.drive.loadDescriptor(this.getId(), success, error);
 };
